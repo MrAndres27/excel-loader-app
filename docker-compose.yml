@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  mysql-db:
+    image: mysql:8.0
+    container_name: excel-loader-db-contenedor
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass456
+      MYSQL_DATABASE: excel_storage
+      MYSQL_USER: exceluser
+      MYSQL_PASSWORD: excelpass456
+    ports:
+      - "3388:3306"
+    volumes:
+      - mysql_storage:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpass456"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - excel-net
+
+  backend:
+    build: ./backend
+    container_name: excel-loader-backend-contenedor
+    image: excel-loader-backend-imagen
+    ports:
+      - "9200:9200"
+    environment:
+      DATABASE_URL: mysql+pymysql://exceluser:excelpass456@mysql-db:3306/excel_storage
+      APP_PORT: 9200
+    depends_on:
+      mysql-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - excel-net
+
+  frontend:
+    build: ./frontend
+    container_name: excel-loader-frontend-contenedor
+    image: excel-loader-frontend-imagen
+    ports:
+      - "5500:80"
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - excel-net
+
+volumes:
+  mysql_storage:
+
+networks:
+  excel-net:
+    driver: bridge
