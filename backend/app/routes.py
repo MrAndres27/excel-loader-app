@@ -8,7 +8,132 @@ from datetime import datetime
 import time
 import uuid
 
+
 router = APIRouter()
+
+
+@router.post("/preview/excel")
+async def preview_excel_file(file: UploadFile = File(...)):
+    """
+    Endpoint para previsualizar el archivo Excel sin guardarlo en BD
+    """
+    if not file.filename.endswith(('.xlsx', '.xls', '.xlsm')):
+        raise HTTPException(
+            status_code=400, 
+            detail="Solo se permiten archivos Excel (.xlsx, .xls, .xlsm)"
+        )
+    
+    try:
+        print(f"📖 Previsualizando archivo: {file.filename}")
+        contents = await file.read()
+        excel_file = pd.ExcelFile(contents, engine='openpyxl')
+        
+        sheets_data = {}
+        for sheet_name in excel_file.sheet_names:
+            df = pd.read_excel(excel_file, sheet_name=sheet_name)
+            
+            sheets_data[sheet_name] = {
+                "total_rows": len(df),
+                "columns": df.columns.tolist(),
+                "preview_data": df.head(100).to_dict('records'),
+                "is_empty": len(df) == 0
+            }
+        
+        print(f"✅ Preview exitoso: {len(excel_file.sheet_names)} hojas encontradas")
+        
+        return {
+            "filename": file.filename,
+            "total_sheets": len(excel_file.sheet_names),
+            "sheet_names": excel_file.sheet_names,
+            "sheets_data": sheets_data
+        }
+        
+    except Exception as e:
+        print(f"❌ Error en preview: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error previsualizando archivo: {str(e)}"
+        )
+
+
+@router.post("/insert/excel")
+async def insert_excel_data(
+    data: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    Endpoint para insertar datos previsualizados en la base de datos
+    """
+    try:
+        filename = data.get("filename")
+        sheet_name = data.get("sheet_name")
+        rows = data.get("data", [])
+        
+        if not rows:
+            raise HTTPException(status_code=400, detail="No hay datos para insertar")
+        
+        batch_id = str(uuid.uuid4())[:8]
+        total_rows = len(rows)
+        processed = 0
+        
+        print(f"💾 Insertando {total_rows} filas de {filename} ({sheet_name})")
+        
+        response = {
+            "filename": filename,
+            "batch_id": batch_id,
+            "rows_inserted": 0,
+            "progress_updates": []
+        }
+        
+        batch_size = max(1, total_rows // 10)
+        
+        for i in range(0, total_rows, batch_size):
+            batch = rows[i:i+batch_size]
+            
+            for row in batch:
+                record = ExcelRecord(
+                    filename=filename,
+                    row_data=json.dumps(row, default=str),
+                    upload_batch=batch_id
+                )
+                db.add(record)
+            
+            db.commit()
+            processed += len(batch)
+            progress_pct = int((processed / total_rows) * 100)
+            
+            response["progress_updates"].append({
+                "percentage": progress_pct,
+                "rows_done": processed,
+                "timestamp": datetime.now().isoformat()
+            })
+            
+            print(f"✅ Progreso: {progress_pct}% ({processed}/{total_rows})")
+            time.sleep(0.15)
+        
+        response["rows_inserted"] = processed
+        
+        # Guardar log
+        log = ProcessLog(
+            filename=filename,
+            status="completed",
+            total_rows=total_rows,
+            success_rows=processed
+        )
+        db.add(log)
+        db.commit()
+        
+        print(f"🎉 Inserción completada: {processed} filas guardadas")
+        
+        return response
+        
+    except Exception as e:
+        print(f"❌ Error insertando: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error insertando datos: {str(e)}"
+        )
+
 
 @router.post("/upload/excel")
 async def upload_excel_file(
@@ -16,26 +141,17 @@ async def upload_excel_file(
     db: Session = Depends(get_db)
 ):
     """
-    Endpoint principal para procesar archivos Excel
-    
-    - Lee el archivo Excel
-    - Procesa las filas
-    - Guarda en base de datos
-    - Retorna progreso de 0 a 100
+    Endpoint original para procesar y guardar archivos Excel directamente
     """
-    
-    # Validar extensión del archivo
     if not file.filename.endswith(('.xlsx', '.xls', '.xlsm')):
         raise HTTPException(
             status_code=400, 
             detail="Solo se permiten archivos Excel (.xlsx, .xls, .xlsm)"
         )
     
-    # Generar ID único para este lote
     batch_id = str(uuid.uuid4())[:8]
     
     try:
-        # Leer archivo Excel
         print(f"📖 Leyendo archivo: {file.filename}")
         contents = await file.read()
         df = pd.read_excel(contents, engine='openpyxl')
@@ -46,7 +162,6 @@ async def upload_excel_file(
         if total_rows == 0:
             raise HTTPException(status_code=400, detail="El archivo Excel está vacío")
         
-        # Preparar respuesta
         response = {
             "filename": file.filename,
             "batch_id": batch_id,
@@ -57,8 +172,7 @@ async def upload_excel_file(
             "success": True
         }
         
-        # Procesar en lotes para mostrar progreso
-        batch_size = max(1, total_rows // 10)  # 10 actualizaciones de progreso
+        batch_size = max(1, total_rows // 10)
         processed = 0
         success_count = 0
         
@@ -68,7 +182,6 @@ async def upload_excel_file(
             batch = df.iloc[i:i+batch_size]
             
             try:
-                # Insertar cada fila del lote
                 for idx, row in batch.iterrows():
                     record = ExcelRecord(
                         filename=file.filename,
@@ -77,15 +190,12 @@ async def upload_excel_file(
                     )
                     db.add(record)
                 
-                # Commit del lote
                 db.commit()
                 processed += len(batch)
                 success_count += len(batch)
                 
-                # Calcular progreso
                 progress_pct = int((processed / total_rows) * 100)
                 
-                # Agregar actualización de progreso
                 response["progress_updates"].append({
                     "percentage": progress_pct,
                     "rows_done": processed,
@@ -93,8 +203,6 @@ async def upload_excel_file(
                 })
                 
                 print(f"✅ Progreso: {progress_pct}% ({processed}/{total_rows} filas)")
-                
-                # Simular tiempo de procesamiento
                 time.sleep(0.15)
                 
             except Exception as e:
@@ -106,7 +214,6 @@ async def upload_excel_file(
                     "error": str(e)
                 })
         
-        # Guardar log del proceso
         log = ProcessLog(
             filename=file.filename,
             status="completed" if not response["errors"] else "completed_with_errors",
@@ -126,7 +233,6 @@ async def upload_excel_file(
     except Exception as e:
         print(f"❌ Error crítico: {str(e)}")
         
-        # Guardar log de error
         log = ProcessLog(
             filename=file.filename,
             status="failed",
@@ -141,6 +247,7 @@ async def upload_excel_file(
             status_code=500, 
             detail=f"Error procesando archivo Excel: {str(e)}"
         )
+
 
 @router.get("/logs")
 async def get_process_logs(db: Session = Depends(get_db), limit: int = 20):
@@ -158,6 +265,7 @@ async def get_process_logs(db: Session = Depends(get_db), limit: int = 20):
         "created_at": log.created_at.isoformat()
     } for log in logs]
 
+
 @router.get("/records")
 async def get_excel_records(db: Session = Depends(get_db), limit: int = 50):
     """Obtener registros almacenados del Excel"""
@@ -172,6 +280,7 @@ async def get_excel_records(db: Session = Depends(get_db), limit: int = 50):
         "data": json.loads(record.row_data),
         "created_at": record.created_at.isoformat()
     } for record in records]
+
 
 @router.get("/stats")
 async def get_statistics(db: Session = Depends(get_db)):
@@ -188,6 +297,6 @@ async def get_statistics(db: Session = Depends(get_db)):
         "total_uploads": total_uploads,
         "successful_uploads": successful_uploads,
         "failed_uploads": total_uploads - successful_uploads,
-        "api_version": "2.0",
+        "api_version": "2.5",
         "port": 9200
     }

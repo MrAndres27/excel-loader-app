@@ -3,9 +3,50 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Excel Loader v2.0 - Puerto 5500</title>
-    <meta name="description" content="Sistema de carga y procesamiento de archivos Excel">
+    <title>Excel Loader v2.5</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'dark-bg': '#0f0b15',
+                        'dark-card': '#1a1525',
+                        'dark-secondary': '#251d35',
+                        'dark-hover': '#2a1f3d',
+                        'purple-dark': '#3e1a6b',
+                        'purple-medium': '#5a4f7c',
+                        'purple-light': '#7c6ba1',
+                        'purple-accent': '#8d43ad',
+                        'purple-glow': '#a855f7',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background: linear-gradient(135deg, #0f0b15 0%, #1a1525 50%, #251d35 100%) !important;
+            min-height: 100vh !important;
+        }
+        
+        ::-webkit-scrollbar {
+            width: 12px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #1a1525;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #5a4f7c;
+            border-radius: 6px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #7c6ba1;
+        }
+    </style>
 </head>
 <body>
     <div id="root"></div>
